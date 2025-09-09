@@ -5,6 +5,6 @@ on:
         steps:
           - name: Write secret to file
             run: |
-              echo "${{ secrets.MY_SECRET_KEY }}" > secret.txt
+              echo "${{ secrets.OSINT_API_1 }}" > secret.txt
             env:
               MY_SECRET_KEY: ${{ secrets.OSINT_API_1 }}

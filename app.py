@@ -205,8 +205,8 @@ def check_rate_limit(client_id):
     today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     cursor.execute('''
         SELECT COUNT(*) FROM search_logs 
-        WHERE client_id = ? AND timestamp >= ? AND success = 1
-    ''', (client_id, today_start.isoformat()))
+        WHERE client_id = ? AND datetime(timestamp) >= datetime(?) AND success = 1
+    ''', (client_id, today_start.strftime('%Y-%m-%d %H:%M:%S')))
     
     daily_usage = cursor.fetchone()[0]
     conn.close()
@@ -675,13 +675,32 @@ def search():
             log_search(client_ip, user_agent, logged_query, country, total_results, True, None, 
                       client_id, search_type, targeted_query, state, 200)
             
-            # Create response with client ID cookie
-            response = make_response(jsonify(response_data))
-            response.set_cookie('client_id', client_id, max_age=365*24*60*60, 
-                               httponly=True, secure=request.is_secure, samesite='Lax')
-            return response
+            # Create response with client ID cookie and all search results
+            final_response = {
+                'organic_results': results['organic_results'],
+                'news_results': results['news_results'],
+                'image_results': results['image_results'],
+                'video_results': results['video_results'],
+                'local_results': results['local_results'],
+                'shopping_results': results['shopping_results'],
+                'scholarly_articles': results['scholarly_articles'],
+                'related_searches': results['related_searches'],
+                'people_also_ask': results['people_also_ask'],
+                'top_stories': results['top_stories'],
+                'search_information': results['search_information'],
+                'knowledge_graph': results['knowledge_graph'],
+                'answer_box': results['answer_box'],
+                'query': results['query'],
+                'country': results['country'],
+                'raw_data': results['raw_data'],
+                'client_id': client_id,
+                'rate_limit_status': limit_msg
+            }
             
-            return jsonify(results)
+            response_obj = make_response(jsonify(final_response))
+            response_obj.set_cookie('client_id', client_id, max_age=365*24*60*60, 
+                                   httponly=True, secure=request.is_secure, samesite='Lax')
+            return response_obj
         elif response.status_code == 401:
             log_search(client_ip, user_agent, query, country, 0, False, 'Invalid SERP API key')
             return jsonify({'error': 'Invalid SERP API key. Please check your API credentials.'}), 401
@@ -940,6 +959,331 @@ def admin_dashboard():
         </div>
     </body></html>
     ''', serp_usage=serp_usage, total_clients=total_clients, unlimited_clients=unlimited_clients, today_searches=today_searches)
+
+@app.route('/admin/clients')
+@require_admin
+def admin_clients():
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT c.client_id, c.created_at, c.first_ip, c.daily_limit, c.unlimited, c.unlimited_until, c.self_subject,
+               COUNT(s.id) as search_count,
+               COUNT(CASE WHEN s.timestamp >= date("now", "start of day") THEN 1 END) as today_searches
+        FROM clients c
+        LEFT JOIN search_logs s ON c.client_id = s.client_id
+        GROUP BY c.client_id
+        ORDER BY c.created_at DESC
+    ''')
+    
+    clients = cursor.fetchall()
+    conn.close()
+    
+    client_list = ''
+    for client in clients:
+        client_id, created_at, first_ip, daily_limit, unlimited, unlimited_until, self_subject, search_count, today_searches = client
+        status = '🔓 Unlimited' if unlimited else f'📊 {today_searches}/{daily_limit}'
+        toggle_text = 'Remove' if unlimited else 'Grant'
+        toggle_color = '#e74c3c' if unlimited else '#27ae60'
+        
+        client_list += f'''
+        <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{client_id[:8]}...</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{created_at}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{first_ip}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{status}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{self_subject or 'Not set'}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{search_count}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">
+                <form method="post" action="/admin/toggle_unlimited" style="display: inline;">
+                    <input type="hidden" name="client_id" value="{client_id}">
+                    <button type="submit" style="padding: 5px 10px; background: {toggle_color}; color: white; border: none; border-radius: 3px; cursor: pointer;">{toggle_text} Unlimited</button>
+                </form>
+            </td>
+        </tr>
+        '''
+    
+    return render_template_string(f'''
+    <!DOCTYPE html>
+    <html><head><title>Client Management - OSINT Tool</title></head>
+    <body style="font-family: Arial; background: #f8f9fa; padding: 20px;">
+        <div style="max-width: 1200px; margin: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                <h1 style="color: #2c3e50;">👥 Client Management</h1>
+                <a href="/admin" style="padding: 10px 20px; background: #95a5a6; color: white; text-decoration: none; border-radius: 5px;">← Back to Dashboard</a>
+            </div>
+            
+            <div style="background: white; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead style="background: #3498db; color: white;">
+                        <tr>
+                            <th style="padding: 15px; text-align: left;">Client ID</th>
+                            <th style="padding: 15px; text-align: left;">Created</th>
+                            <th style="padding: 15px; text-align: left;">IP</th>
+                            <th style="padding: 15px; text-align: left;">Status</th>
+                            <th style="padding: 15px; text-align: left;">Self (@s)</th>
+                            <th style="padding: 15px; text-align: left;">Total Searches</th>
+                            <th style="padding: 15px; text-align: left;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>{client_list}</tbody>
+                </table>
+            </div>
+        </div>
+    </body></html>
+    ''')
+
+@app.route('/admin/toggle_unlimited', methods=['POST'])
+@require_admin
+def admin_toggle_unlimited():
+    client_id = request.form.get('client_id')
+    
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT unlimited FROM clients WHERE client_id = ?', (client_id,))
+    result = cursor.fetchone()
+    
+    if result:
+        new_unlimited = not result[0]
+        cursor.execute('UPDATE clients SET unlimited = ? WHERE client_id = ?', (new_unlimited, client_id))
+        conn.commit()
+    
+    conn.close()
+    return redirect(url_for('admin_clients'))
+
+# Terminal interface
+@app.route('/terminal')
+def terminal():
+    if not session.get('terminal_authenticated') and not session.get('admin_authenticated'):
+        return redirect(url_for('terminal_login'))
+    
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html><head><title>OSINT Terminal</title></head>
+    <body style="font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; padding: 20px;">
+        <div style="max-width: 1000px; margin: auto;">
+            <h1 style="color: #00ff00; text-align: center;">💻 OSINT Terminal Interface</h1>
+            <div id="output" style="background: #000; padding: 20px; border-radius: 5px; height: 400px; overflow-y: auto; margin-bottom: 20px; border: 1px solid #333;"></div>
+            <form id="terminalForm" style="display: flex;">
+                <span style="color: #00ff00; margin-right: 10px;">osint@terminal:~$</span>
+                <input type="text" id="command" name="command" placeholder="Type 'help' for commands" 
+                       style="flex: 1; background: #000; border: 1px solid #333; color: #00ff00; padding: 10px; font-family: 'Courier New', monospace;">
+                <button type="submit" style="background: #333; color: #00ff00; border: 1px solid #555; padding: 10px 20px; margin-left: 10px; cursor: pointer;">Execute</button>
+            </form>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 5px;">
+                <h3 style="color: #00ff00; margin-top: 0;">📖 Available Commands:</h3>
+                <p><strong>search</strong> &lt;query&gt; [--type &lt;category&gt;] [--country &lt;code&gt;] [--state &lt;state&gt;] - Perform OSINT search</p>
+                <p><strong>set self</strong> "&lt;name&gt;" - Set your identity for @s substitution</p>
+                <p><strong>status</strong> - Show your rate limit status</p>
+                <p><strong>help</strong> - Show this help message</p>
+                <p><strong>clear</strong> - Clear terminal output</p>
+                <p style="color: #ffaa00;">💡 Use @s in queries to substitute your set identity</p>
+            </div>
+        </div>
+        
+        <script>
+        const form = document.getElementById('terminalForm');
+        const output = document.getElementById('output');
+        const commandInput = document.getElementById('command');
+        
+        function addOutput(text, isCommand = false) {
+            const div = document.createElement('div');
+            div.style.marginBottom = '5px';
+            if (isCommand) {
+                div.style.color = '#ffaa00';
+                div.innerHTML = `<span style="color: #00ff00;">osint@terminal:~$</span> ${text}`;
+            } else {
+                div.innerHTML = text;
+            }
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        addOutput('Terminal initialized. Type "help" for available commands.');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const command = commandInput.value.trim();
+            if (!command) return;
+            
+            addOutput(command, true);
+            commandInput.value = '';
+            
+            if (command === 'clear') {
+                output.innerHTML = '';
+                addOutput('Terminal cleared.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/terminal/exec', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command: command})
+                });
+                
+                const result = await response.text();
+                addOutput(result);
+            } catch (error) {
+                addOutput(`<span style="color: #ff0000;">Error: ${error.message}</span>`);
+            }
+        });
+        
+        commandInput.focus();
+        </script>
+    </body></html>
+    ''')
+
+@app.route('/terminal/login', methods=['GET', 'POST'])
+def terminal_login():
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if password == TERMINAL_PASSWORD or password == ADMIN_PASSWORD:
+            session['terminal_authenticated'] = True
+            return redirect(url_for('terminal'))
+        else:
+            return render_template_string('''
+            <!DOCTYPE html>
+            <html><head><title>Terminal Login</title></head>
+            <body style="font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; padding: 50px;">
+                <div style="max-width: 400px; margin: auto; background: #000; padding: 30px; border-radius: 10px; border: 1px solid #333;">
+                    <h2 style="color: #ff0000; text-align: center;">❌ ACCESS DENIED</h2>
+                    <form method="post" style="margin-top: 20px;">
+                        <input type="password" name="password" placeholder="Terminal Password" required 
+                               style="width: 100%; padding: 15px; background: #000; border: 1px solid #333; color: #00ff00; margin-bottom: 15px; font-family: 'Courier New', monospace;">
+                        <button type="submit" style="width: 100%; padding: 15px; background: #333; color: #00ff00; border: 1px solid #555; cursor: pointer; font-family: 'Courier New', monospace;">AUTHENTICATE</button>
+                    </form>
+                </div>
+            </body></html>
+            ''')
+    
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html><head><title>Terminal Access</title></head>
+    <body style="font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; padding: 50px;">
+        <div style="max-width: 400px; margin: auto; background: #000; padding: 30px; border-radius: 10px; border: 1px solid #333;">
+            <h2 style="text-align: center; color: #00ff00;">🔐 TERMINAL ACCESS</h2>
+            <form method="post" style="margin-top: 20px;">
+                <input type="password" name="password" placeholder="Enter Terminal Password" required 
+                       style="width: 100%; padding: 15px; background: #000; border: 1px solid #333; color: #00ff00; margin-bottom: 15px; font-family: 'Courier New', monospace;">
+                <button type="submit" style="width: 100%; padding: 15px; background: #333; color: #00ff00; border: 1px solid #555; cursor: pointer; font-family: 'Courier New', monospace;">AUTHENTICATE</button>
+            </form>
+            <p style="text-align: center; margin-top: 20px; color: #888; font-size: 14px;">⚠️ Authorized Personnel Only</p>
+        </div>
+    </body></html>
+    ''')
+
+@app.route('/terminal/exec', methods=['POST'])
+def terminal_exec():
+    if not session.get('terminal_authenticated') and not session.get('admin_authenticated'):
+        return 'Authentication required', 401
+    
+    data = request.get_json()
+    command = data.get('command', '').strip()
+    
+    if not command:
+        return 'No command provided'
+    
+    # Get client for terminal session
+    client_id = get_or_create_client(request)
+    
+    try:
+        # Parse command
+        parts = command.split()
+        cmd = parts[0].lower()
+        
+        if cmd == 'help':
+            return '''
+<span style="color: #00ff00;">📖 Available Commands:</span>
+<span style="color: #ffaa00;">search</span> &lt;query&gt; [--type &lt;category&gt;] [--country &lt;code&gt;] [--state &lt;state&gt;] - Perform OSINT search
+<span style="color: #ffaa00;">set self</span> "&lt;name&gt;" - Set your identity for @s substitution
+<span style="color: #ffaa00;">status</span> - Show your rate limit status
+<span style="color: #ffaa00;">help</span> - Show this help message
+<span style="color: #ffaa00;">clear</span> - Clear terminal output
+
+<span style="color: #888;">💡 Use @s in queries to substitute your set identity</span>
+            '''
+        
+        elif cmd == 'status':
+            allowed, limit_msg = check_rate_limit(client_id)
+            serp_usage = get_serp_usage()
+            
+            return f'''
+<span style="color: #00ff00;">📊 Rate Limit Status:</span> {limit_msg}
+<span style="color: #00ff00;">🔑 Client ID:</span> {client_id[:8]}...
+<span style="color: #00ff00;">📈 SERP Usage:</span> {serp_usage.get('used_this_month', 'N/A')}/{serp_usage.get('monthly_limit', 'N/A')} ({serp_usage.get('remaining', 'N/A')} remaining)
+            '''
+        
+        elif cmd == 'set' and len(parts) >= 3 and parts[1].lower() == 'self':
+            # Extract name from quotes
+            name_part = ' '.join(parts[2:])
+            if name_part.startswith('"') and name_part.endswith('"'):
+                name = name_part[1:-1]
+            else:
+                name = name_part
+            
+            # Update client's self_subject
+            conn = sqlite3.connect('osint_searches.db')
+            cursor = conn.cursor()
+            cursor.execute('UPDATE clients SET self_subject = ? WHERE client_id = ?', (name, client_id))
+            conn.commit()
+            conn.close()
+            
+            return f'<span style="color: #00ff00;">✅ Self-reference set to:</span> {name}'
+        
+        elif cmd == 'search':
+            # Parse search command
+            query = ''
+            search_type = 'general'
+            country = 'us'
+            state = ''
+            
+            i = 1
+            while i < len(parts):
+                if parts[i] == '--type' and i + 1 < len(parts):
+                    search_type = parts[i + 1]
+                    i += 2
+                elif parts[i] == '--country' and i + 1 < len(parts):
+                    country = parts[i + 1]
+                    i += 2
+                elif parts[i] == '--state' and i + 1 < len(parts):
+                    state = parts[i + 1]
+                    i += 2
+                else:
+                    query += parts[i] + ' '
+                    i += 1
+            
+            query = query.strip()
+            if not query:
+                return '<span style="color: #ff0000;">❌ Error: No search query provided</span>'
+            
+            # Substitute @s reference
+            try:
+                query = substitute_self_reference(query, client_id)
+            except ValueError as e:
+                return f'<span style="color: #ff0000;">❌ Error: {str(e)}</span>'
+            
+            # Check rate limits first
+            allowed, limit_msg = check_rate_limit(client_id)
+            if not allowed:
+                return f'<span style="color: #ff0000;">❌ Rate Limited: {limit_msg}</span>'
+            
+            return f'''
+<span style="color: #00ff00;">🔍 Search command received:</span>
+<span style="color: #ffaa00;">Query:</span> {query}
+<span style="color: #ffaa00;">Type:</span> {search_type}
+<span style="color: #ffaa00;">Location:</span> {country.upper()}{f", {state.upper()}" if state else ""}
+
+<span style="color: #888;">💡 Use the web interface for detailed results</span>
+            '''
+        
+        else:
+            return f'<span style="color: #ff0000;">❌ Unknown command: {cmd}</span>\nType "help" for available commands'
+    
+    except Exception as e:
+        return f'<span style="color: #ff0000;">❌ Command Error: {str(e)}</span>'
 
 if __name__ == '__main__':
     if not SERPAPI_KEY:

@@ -344,7 +344,11 @@
         
         function showError(message) {
             const errorContainer = document.getElementById('error-container');
-            errorContainer.innerHTML = `<div class="error">${message}</div>`;
+            errorContainer.innerHTML = '';
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message; // Safe from XSS
+            errorContainer.appendChild(errorDiv);
         }
         
         function displayResults(data) {

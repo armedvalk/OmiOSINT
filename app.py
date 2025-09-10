@@ -80,6 +80,7 @@ def search():
         # Robust JSON parsing with comprehensive validation
         data = None
         
+        
         # Handle different content types and payload formats
         if request.content_type and 'application/json' in request.content_type:
             try:
@@ -117,7 +118,7 @@ def search():
         
         # Validate and extract parameters
         if not isinstance(data, dict):
-            log_search(client_ip, user_agent, query, country, 0, False, 'Data is not a dictionary')
+            log_search(client_ip, user_agent, query, country, 0, False, f'Data not dict: {type(data)} = {repr(data)}')
             return jsonify({'error': 'Invalid request format'}), 400
         
         # Extract and validate query

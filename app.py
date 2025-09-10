@@ -3,9 +3,14 @@ import sqlite3
 import requests
 import datetime
 import json
-from flask import Flask, request, jsonify, render_template_string
+import uuid
+import secrets
+from datetime import timedelta
+from flask import Flask, request, jsonify, render_template_string, session, make_response, redirect, url_for
 from flask_cors import CORS
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 load_dotenv()
 
@@ -15,11 +20,24 @@ CORS(app, origins=['http://localhost:5000', 'https://*.replit.app', 'https://*.r
 # Get SERP API key from environment
 SERPAPI_KEY = os.getenv('SERPAPI_API_KEY')
 
+# Monthly SERP API limit from environment (default 10,000)
+SERPAPI_MONTHLY_LIMIT = int(os.getenv('SERPAPI_MONTHLY_LIMIT', '10000'))
+
+# Admin panel password (set via environment)
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+
+# Terminal password (set via environment)
+TERMINAL_PASSWORD = os.getenv('TERMINAL_PASSWORD', 'terminal456')
+
+# Flask secret key for sessions
+app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+
 # Initialize database
 def init_database():
     conn = sqlite3.connect('osint_searches.db')
     cursor = conn.cursor()
     
+    # Enhanced search logs table with client tracking
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS search_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,23 +48,227 @@ def init_database():
             country TEXT NOT NULL,
             results_count INTEGER DEFAULT 0,
             success BOOLEAN DEFAULT TRUE,
-            error_message TEXT
+            error_message TEXT,
+            client_id TEXT,
+            search_type TEXT DEFAULT 'general',
+            targeted_query TEXT,
+            state TEXT,
+            status_code INTEGER DEFAULT 200,
+            serp_cost_cents INTEGER DEFAULT 0
+        )
+    ''')
+    
+    # Clients table for rate limiting and management
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            first_ip TEXT NOT NULL,
+            first_user_agent TEXT,
+            daily_limit INTEGER DEFAULT 10,
+            unlimited BOOLEAN DEFAULT FALSE,
+            unlimited_until DATETIME,
+            self_subject TEXT,
+            active BOOLEAN DEFAULT TRUE,
+            notes TEXT
+        )
+    ''')
+    
+    # Admin users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'admin',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_login DATETIME,
+            is_active BOOLEAN DEFAULT TRUE
+        )
+    ''')
+    
+    # Terminal sessions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS terminal_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            session_token TEXT UNIQUE NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+            revoked BOOLEAN DEFAULT FALSE,
+            ip_address TEXT NOT NULL,
+            FOREIGN KEY (client_id) REFERENCES clients(client_id)
         )
     ''')
     
     conn.commit()
     conn.close()
 
+def migrate_database():
+    """Add missing columns to existing database"""
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    # Check if columns exist and add them if missing
+    cursor.execute("PRAGMA table_info(search_logs)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    missing_columns = {
+        'client_id': 'TEXT',
+        'search_type': 'TEXT DEFAULT "general"',
+        'targeted_query': 'TEXT',
+        'state': 'TEXT',
+        'status_code': 'INTEGER DEFAULT 200',
+        'serp_cost_cents': 'INTEGER DEFAULT 0'
+    }
+    
+    for column_name, column_def in missing_columns.items():
+        if column_name not in columns:
+            try:
+                cursor.execute(f'ALTER TABLE search_logs ADD COLUMN {column_name} {column_def}')
+                print(f"Added column: {column_name}")
+            except sqlite3.OperationalError as e:
+                print(f"Column {column_name} may already exist: {e}")
+    
+    conn.commit()
+    conn.close()
+
+# Client management functions
+def get_or_create_client(request_obj):
+    """Get or create client based on client_id cookie/header"""
+    client_id = request_obj.cookies.get('client_id') or request_obj.headers.get('X-Client-Id')
+    
+    if not client_id:
+        # Generate new client ID
+        client_id = str(uuid.uuid4())
+        
+    # Check if client exists
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM clients WHERE client_id = ?', (client_id,))
+    client = cursor.fetchone()
+    
+    if not client:
+        # Create new client
+        ip_address = get_client_ip(request_obj)
+        user_agent = request_obj.headers.get('User-Agent', '')
+        
+        cursor.execute('''
+            INSERT INTO clients (client_id, first_ip, first_user_agent) 
+            VALUES (?, ?, ?)
+        ''', (client_id, ip_address, user_agent))
+        
+        conn.commit()
+    
+    conn.close()
+    return client_id
+
+def get_client_ip(request_obj):
+    """Extract client IP from request"""
+    forwarded_for = request_obj.environ.get('HTTP_X_FORWARDED_FOR', '')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request_obj.environ.get('REMOTE_ADDR', 'unknown')
+
+def check_rate_limit(client_id):
+    """Check if client has exceeded daily rate limit"""
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    # Get client settings
+    cursor.execute('SELECT daily_limit, unlimited, unlimited_until FROM clients WHERE client_id = ?', (client_id,))
+    client_settings = cursor.fetchone()
+    
+    if not client_settings:
+        conn.close()
+        return False, "Client not found"
+    
+    daily_limit, unlimited, unlimited_until = client_settings
+    
+    # Check if client has unlimited access
+    if unlimited:
+        conn.close()
+        return True, "Unlimited access"
+    
+    if unlimited_until:
+        try:
+            until_date = datetime.datetime.fromisoformat(unlimited_until)
+            if datetime.datetime.now() < until_date:
+                conn.close()
+                return True, f"Unlimited until {unlimited_until}"
+        except:
+            pass
+    
+    # Check daily usage
+    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    cursor.execute('''
+        SELECT COUNT(*) FROM search_logs 
+        WHERE client_id = ? AND timestamp >= ? AND success = 1
+    ''', (client_id, today_start.isoformat()))
+    
+    daily_usage = cursor.fetchone()[0]
+    conn.close()
+    
+    if daily_usage >= daily_limit:
+        return False, f"Daily limit exceeded ({daily_usage}/{daily_limit})"
+    
+    return True, f"Usage: {daily_usage}/{daily_limit}"
+
+def get_serp_usage():
+    """Get current month SERP API usage"""
+    try:
+        response = requests.get(f'https://serpapi.com/account.json?api_key={SERPAPI_KEY}')
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'monthly_limit': data.get('searches_per_month', 0),
+                'used_this_month': data.get('this_month_usage', 0),
+                'remaining': data.get('plan_searches_left', 0),
+                'plan_name': data.get('plan_name', 'Unknown')
+            }
+    except Exception as e:
+        print(f"Error checking SERP usage: {e}")
+    
+    return {'error': 'Unable to fetch SERP usage'}
+
+# Authentication decorators
+def require_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_authenticated'):
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def substitute_self_reference(query, client_id):
+    """Replace @s with client's self_subject"""
+    if '@s' not in query:
+        return query
+    
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT self_subject FROM clients WHERE client_id = ?', (client_id,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result and result[0]:
+        return query.replace('@s', result[0])
+    else:
+        raise ValueError('Self-reference @s used but no self_subject set. Use "set self [name]" command first.')
+
 # Log search to database
-def log_search(ip_address, user_agent, query, country, results_count=0, success=True, error_message=None):
+def log_search(ip_address, user_agent, query, country, results_count=0, success=True, error_message=None, client_id=None, search_type='general', targeted_query=None, state=None, status_code=200):
     try:
         conn = sqlite3.connect('osint_searches.db')
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO search_logs (ip_address, user_agent, query, country, results_count, success, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (ip_address, user_agent, query, country, results_count, success, error_message))
+            INSERT INTO search_logs (ip_address, user_agent, query, country, results_count, success, error_message, client_id, search_type, targeted_query, state, status_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (ip_address, user_agent, query, country, results_count, success, error_message, client_id, search_type, targeted_query, state, status_code))
         
         conn.commit()
         conn.close()
@@ -56,25 +278,47 @@ def log_search(ip_address, user_agent, query, country, results_count=0, success=
 # Initialize database on startup
 init_database()
 
+# Run database migration for existing databases
+try:
+    migrate_database()
+except Exception as e:
+    print(f"Migration error: {e}")
+
 @app.route('/')
 def index():
     return render_template_string(open('main.html').read())
 
 @app.route('/search', methods=['POST'])
 def search():
-    # Get client IP and user agent for logging
-    # Extract the first IP from X-Forwarded-For header (client IP)
-    forwarded_for = request.environ.get('HTTP_X_FORWARDED_FOR', '')
-    if forwarded_for:
-        client_ip = forwarded_for.split(',')[0].strip()
-    else:
-        client_ip = request.environ.get('REMOTE_ADDR', 'unknown')
+    # Client identification and rate limiting
+    client_id = get_or_create_client(request)
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get('User-Agent', 'unknown')[:500]
     
-    user_agent = request.environ.get('HTTP_USER_AGENT', 'unknown')[:500]  # Limit length
+    # Check SERP API monthly usage first
+    serp_usage = get_serp_usage()
+    if 'error' not in serp_usage and serp_usage.get('remaining', 0) <= 0:
+        log_search(client_ip, user_agent, '', 'us', 0, False, 'SERP API monthly limit exceeded', client_id, status_code=429)
+        return jsonify({
+            'error': 'Monthly SERP API limit exceeded',
+            'serp_usage': serp_usage
+        }), 429
+    
+    # Check daily rate limit for this client
+    allowed, limit_msg = check_rate_limit(client_id)
+    if not allowed:
+        log_search(client_ip, user_agent, '', 'us', 0, False, f'Rate limit: {limit_msg}', client_id, status_code=429)
+        return jsonify({
+            'error': 'Daily search limit exceeded',
+            'message': limit_msg,
+            'client_id': client_id
+        }), 429
     
     # Initialize variables for logging
     query = ''
     country = 'us'
+    search_type = 'general'
+    state = ''
     
     try:
         # Robust JSON parsing with comprehensive validation
@@ -424,12 +668,18 @@ def search():
                            len(results.get('scholarly_articles', [])) +
                            len(results.get('top_stories', [])))
             
-            # Log successful search (include search type and state info)
+            # Log successful search (include all tracking info)
             logged_query = f"[{search_type.upper()}] {query}"
             if state:
                 logged_query = f"{logged_query} [{state.upper()}]"
-            log_search(client_ip, user_agent, logged_query, country, total_results, True, None)
-            # Logging includes search type and state information
+            log_search(client_ip, user_agent, logged_query, country, total_results, True, None, 
+                      client_id, search_type, targeted_query, state, 200)
+            
+            # Create response with client ID cookie
+            response = make_response(jsonify(response_data))
+            response.set_cookie('client_id', client_id, max_age=365*24*60*60, 
+                               httponly=True, secure=request.is_secure, samesite='Lax')
+            return response
             
             return jsonify(results)
         elif response.status_code == 401:
@@ -590,6 +840,106 @@ def health():
         'serpapi_configured': bool(SERPAPI_KEY),
         'database_healthy': db_healthy
     })
+
+# Admin panel routes
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if password == ADMIN_PASSWORD:
+            session['admin_authenticated'] = True
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return render_template_string('''
+            <!DOCTYPE html>
+            <html><head><title>Admin Login - OSINT Tool</title></head>
+            <body style="font-family: Arial; background: #f0f0f0; padding: 50px;">
+                <div style="max-width: 400px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h2 style="color: #e74c3c; text-align: center;">❌ Invalid Password</h2>
+                    <form method="post" style="margin-top: 20px;">
+                        <input type="password" name="password" placeholder="Admin Password" required 
+                               style="width: 100%; padding: 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 15px;">
+                        <button type="submit" style="width: 100%; padding: 15px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">Login</button>
+                    </form>
+                    <p style="text-align: center; margin-top: 20px; color: #7f8c8d; font-size: 14px;">🔒 Admin Panel Access Required</p>
+                </div>
+            </body></html>
+            ''')
+    
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html><head><title>Admin Login - OSINT Tool</title></head>
+    <body style="font-family: Arial; background: #f0f0f0; padding: 50px;">
+        <div style="max-width: 400px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="text-align: center; color: #2c3e50;">🔐 Admin Panel</h2>
+            <form method="post" style="margin-top: 20px;">
+                <input type="password" name="password" placeholder="Admin Password" required 
+                       style="width: 100%; padding: 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 15px;">
+                <button type="submit" style="width: 100%; padding: 15px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">Login</button>
+            </form>
+            <p style="text-align: center; margin-top: 20px; color: #7f8c8d; font-size: 14px;">🛡️ Administrator Access Only</p>
+        </div>
+    </body></html>
+    ''')
+
+@app.route('/admin')
+@require_admin
+def admin_dashboard():
+    serp_usage = get_serp_usage()
+    
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    # Get client statistics
+    cursor.execute('SELECT COUNT(*) FROM clients')
+    total_clients = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM clients WHERE unlimited = 1')
+    unlimited_clients = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM search_logs WHERE timestamp >= date("now", "start of day")')
+    today_searches = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html><head><title>Admin Dashboard - OSINT Tool</title></head>
+    <body style="font-family: Arial; background: #f8f9fa; padding: 20px;">
+        <div style="max-width: 1200px; margin: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                <h1 style="color: #2c3e50;">🛠️ Admin Dashboard</h1>
+                <div>
+                    <a href="/admin/clients" style="margin-right: 10px; padding: 10px 20px; background: #3498db; color: white; text-decoration: none; border-radius: 5px;">👥 Clients</a>
+                    <a href="/terminal" style="margin-right: 10px; padding: 10px 20px; background: #27ae60; color: white; text-decoration: none; border-radius: 5px;">💻 Terminal</a>
+                    <a href="/" style="padding: 10px 20px; background: #95a5a6; color: white; text-decoration: none; border-radius: 5px;">🏠 Home</a>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <h3 style="color: #3498db; margin-top: 0;">📊 SERP API Usage</h3>
+                    <p><strong>Used:</strong> {{ serp_usage.get('used_this_month', 'N/A') }}</p>
+                    <p><strong>Limit:</strong> {{ serp_usage.get('monthly_limit', 'N/A') }}</p>
+                    <p><strong>Remaining:</strong> {{ serp_usage.get('remaining', 'N/A') }}</p>
+                    <p><strong>Plan:</strong> {{ serp_usage.get('plan_name', 'N/A') }}</p>
+                </div>
+                
+                <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <h3 style="color: #e74c3c; margin-top: 0;">👥 Client Stats</h3>
+                    <p><strong>Total Clients:</strong> {{ total_clients }}</p>
+                    <p><strong>Unlimited:</strong> {{ unlimited_clients }}</p>
+                    <p><strong>Regular:</strong> {{ total_clients - unlimited_clients }}</p>
+                </div>
+                
+                <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <h3 style="color: #27ae60; margin-top: 0;">🔍 Today's Activity</h3>
+                    <p><strong>Searches Today:</strong> {{ today_searches }}</p>
+                </div>
+            </div>
+        </div>
+    </body></html>
+    ''', serp_usage=serp_usage, total_clients=total_clients, unlimited_clients=unlimited_clients, today_searches=today_searches)
 
 if __name__ == '__main__':
     if not SERPAPI_KEY:

@@ -217,7 +217,7 @@ def search():
             'num': 10
         }
         
-        print(f"DEBUG: Using targeted query: {targeted_query}")  # Temporary debug
+        # Search type and targeted query are now working properly
         
         response = requests.get('https://serpapi.com/search', params=params, timeout=10)
         
@@ -429,7 +429,7 @@ def search():
             if state:
                 logged_query = f"{logged_query} [{state.upper()}]"
             log_search(client_ip, user_agent, logged_query, country, total_results, True, None)
-            print(f"DEBUG: Logged query: {logged_query}")  # Temporary debug
+            # Logging includes search type and state information
             
             return jsonify(results)
         elif response.status_code == 401:

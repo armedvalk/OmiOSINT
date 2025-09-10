@@ -209,8 +209,82 @@
         <div class="search-section">
             <form class="search-form" id="searchForm">
                 <div class="form-group">
+                    <label for="searchType">Search Category</label>
+                    <select id="searchType" name="searchType" onchange="updateSearchPlaceholder()">
+                        <option value="general">General OSINT Search</option>
+                        <optgroup label="🏛️ Legal & Criminal Records">
+                            <option value="criminal">Criminal Records & Arrests</option>
+                            <option value="court">Civil Court Cases & Lawsuits</option>
+                            <option value="warrants">Warrants & Legal Issues</option>
+                            <option value="bankruptcy">Bankruptcy Records</option>
+                        </optgroup>
+                        <optgroup label="🏠 Property & Assets">
+                            <option value="property">Property Records & Ownership</option>
+                            <option value="deeds">Deeds & Mortgages</option>
+                            <option value="foreclosure">Foreclosures & Tax Liens</option>
+                            <option value="business_property">Commercial Property</option>
+                        </optgroup>
+                        <optgroup label="📋 Vital & Personal Records">
+                            <option value="birth">Birth Records & Certificates</option>
+                            <option value="death">Death Records & Obituaries</option>
+                            <option value="marriage">Marriage & Divorce Records</option>
+                            <option value="address">Address History</option>
+                            <option value="phone">Phone Numbers & Contact Info</option>
+                        </optgroup>
+                        <optgroup label="💼 Professional & Business">
+                            <option value="licenses">Professional Licenses</option>
+                            <option value="business">Business Records & Filings</option>
+                            <option value="employment">Employment History</option>
+                            <option value="education">Educational Background</option>
+                            <option value="patents">Patents & Trademarks</option>
+                        </optgroup>
+                        <optgroup label="💰 Financial Intelligence">
+                            <option value="assets">Asset Searches</option>
+                            <option value="corporations">Corporate Filings</option>
+                            <option value="sec">SEC Filings & Executives</option>
+                            <option value="tax">Tax Records & Liens</option>
+                        </optgroup>
+                        <optgroup label="🚗 Vehicle & Transportation">
+                            <option value="vehicles">Vehicle Registration</option>
+                            <option value="drivers">Driver's License Records</option>
+                            <option value="aviation">Aircraft & Boat Registration</option>
+                        </optgroup>
+                        <optgroup label="📱 Digital & Social Intelligence">
+                            <option value="social">Social Media Profiles</option>
+                            <option value="online">Online Accounts & Usernames</option>
+                            <option value="breaches">Data Breaches & Leaks</option>
+                            <option value="websites">Website & Domain Ownership</option>
+                        </optgroup>
+                        <optgroup label="🏥 Medical & Health">
+                            <option value="medical">Medical License Records</option>
+                            <option value="sanctions">Healthcare Sanctions</option>
+                            <option value="prescribers">DEA Prescriber Database</option>
+                        </optgroup>
+                        <optgroup label="📰 News & Media">
+                            <option value="news_criminal">Criminal News Coverage</option>
+                            <option value="news_business">Business News & Scandals</option>
+                            <option value="investigations">Investigative Reports</option>
+                            <option value="media">Media Appearances</option>
+                        </optgroup>
+                        <optgroup label="🎓 Academic & Research">
+                            <option value="academic">Academic Publications</option>
+                            <option value="research">Research Papers & Citations</option>
+                            <option value="grants">Research Grants & Funding</option>
+                            <option value="university">University Records</option>
+                        </optgroup>
+                        <optgroup label="🌍 Specialized Records">
+                            <option value="military">Military Service Records</option>
+                            <option value="immigration">Immigration Records</option>
+                            <option value="political">Political Contributions</option>
+                            <option value="nonprofit">Non-profit & Charity Records</option>
+                            <option value="voter">Voter Registration</option>
+                        </optgroup>
+                    </select>
+                </div>
+                
+                <div class="form-group">
                     <label for="query">Search Query</label>
-                    <input type="text" id="query" name="query" placeholder="Enter search terms for OSINT investigation..." required>
+                    <input type="text" id="query" name="query" placeholder="Enter name, business, or identifier..." required>
                 </div>
                 
                 <div class="form-group" style="flex: 0 0 200px;">
@@ -422,9 +496,67 @@
         // Initialize state options on page load
         updateStateOptions();
         
+        // Update search placeholder based on selected category
+        function updateSearchPlaceholder() {
+            const searchType = document.getElementById('searchType').value;
+            const queryInput = document.getElementById('query');
+            
+            const placeholders = {
+                'general': 'Enter search terms for OSINT investigation...',
+                'criminal': 'Enter name for criminal record search...',
+                'court': 'Enter name for court case search...',
+                'warrants': 'Enter name for warrant search...',
+                'bankruptcy': 'Enter name or business for bankruptcy search...',
+                'property': 'Enter name or address for property search...',
+                'deeds': 'Enter property address or owner name...',
+                'foreclosure': 'Enter address or owner name...',
+                'business_property': 'Enter business name or address...',
+                'birth': 'Enter full name and birth year...',
+                'death': 'Enter full name for death record search...',
+                'marriage': 'Enter names for marriage record search...',
+                'address': 'Enter name for address history search...',
+                'phone': 'Enter name or phone number...',
+                'licenses': 'Enter name or license number...',
+                'business': 'Enter business name or owner...',
+                'employment': 'Enter name for employment history...',
+                'education': 'Enter name for education background...',
+                'patents': 'Enter name or patent number...',
+                'assets': 'Enter name for asset search...',
+                'corporations': 'Enter corporation name or officer...',
+                'sec': 'Enter company name or executive...',
+                'tax': 'Enter name or business for tax records...',
+                'vehicles': 'Enter name or license plate...',
+                'drivers': 'Enter name for driving record search...',
+                'aviation': 'Enter name or registration number...',
+                'social': 'Enter name or username...',
+                'online': 'Enter name or username...',
+                'breaches': 'Enter email or username...',
+                'websites': 'Enter domain or website owner...',
+                'medical': 'Enter doctor name or license number...',
+                'sanctions': 'Enter provider name...',
+                'prescribers': 'Enter prescriber name or DEA number...',
+                'news_criminal': 'Enter name for criminal news search...',
+                'news_business': 'Enter business or executive name...',
+                'investigations': 'Enter name or topic...',
+                'media': 'Enter name for media appearance search...',
+                'academic': 'Enter researcher name or topic...',
+                'research': 'Enter author name or research topic...',
+                'grants': 'Enter researcher or institution name...',
+                'university': 'Enter name or university...',
+                'military': 'Enter name for military record search...',
+                'immigration': 'Enter name for immigration records...',
+                'political': 'Enter name or organization...',
+                'nonprofit': 'Enter organization or person name...',
+                'voter': 'Enter name for voter registration...'
+            };
+            
+            queryInput.placeholder = placeholders[searchType] || 'Enter search terms...';
+        }
+        
         document.getElementById('searchForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            const searchType = document.getElementById('searchType').value;
             const query = document.getElementById('query').value.trim();
             const country = document.getElementById('country').value;
             const state = document.getElementById('state').value;
@@ -454,6 +586,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
+                        searchType: searchType,
                         query: query,
                         country: country,
                         state: state
@@ -927,7 +1060,7 @@
                 
                 // Statistics section
                 const statsSection = createElement('div', 'results');
-                const statsTitle = createElement('h3', 'section-title', '📈 Search Statistics');
+                const statsTitle = createElement('h3', 'section-title', '📊 Search Statistics');
                 statsSection.appendChild(statsTitle);
                 
                 const statsGrid = document.createElement('div');

@@ -138,24 +138,86 @@ def search():
         raw_state = data.get('state', '')
         state = str(raw_state).lower().strip() if raw_state is not None else ''
         
+        # Extract search type for targeted queries
+        search_type = data.get('searchType', 'general')
+        if not isinstance(search_type, str):
+            search_type = 'general'
+        
         if not query.strip():
             log_search(client_ip, user_agent, query, country, 0, False, 'Empty search query')
             return jsonify({'error': 'Search query is required'}), 400
         
-        # SERP API request
+        # Build targeted search query based on search type
+        targeted_query = query
+        
+        # Add search type-specific terms for better OSINT results
+        search_modifiers = {
+            'criminal': f'"{query}" (arrest OR criminal OR conviction OR mugshot OR court)',
+            'court': f'"{query}" (lawsuit OR court case OR civil OR judgment)',
+            'warrants': f'"{query}" (warrant OR wanted OR fugitive)',
+            'bankruptcy': f'"{query}" (bankruptcy OR chapter 7 OR chapter 11 OR debt)',
+            'property': f'"{query}" (property records OR real estate OR deed OR owner)',
+            'deeds': f'"{query}" (deed OR mortgage OR property transfer)',
+            'foreclosure': f'"{query}" (foreclosure OR tax lien OR sheriff sale)',
+            'business_property': f'"{query}" (commercial property OR business real estate)',
+            'birth': f'"{query}" (birth certificate OR birth record OR born)',
+            'death': f'"{query}" (death certificate OR obituary OR died OR deceased)',
+            'marriage': f'"{query}" (marriage certificate OR wedding OR married OR divorce)',
+            'address': f'"{query}" (address OR residence OR lived OR home)',
+            'phone': f'"{query}" (phone number OR telephone OR contact)',
+            'licenses': f'"{query}" (professional license OR certification OR permit)',
+            'business': f'"{query}" (business registration OR LLC OR corporation OR company)',
+            'employment': f'"{query}" (employment OR job OR work OR employer)',
+            'education': f'"{query}" (education OR school OR university OR degree OR alumni)',
+            'patents': f'"{query}" (patent OR trademark OR intellectual property)',
+            'assets': f'"{query}" (assets OR wealth OR financial OR investments)',
+            'corporations': f'"{query}" (corporation OR SEC filing OR executive OR officer)',
+            'sec': f'"{query}" (SEC filing OR insider trading OR executive compensation)',
+            'tax': f'"{query}" (tax records OR IRS OR tax lien OR assessment)',
+            'vehicles': f'"{query}" (vehicle registration OR car OR license plate)',
+            'drivers': f'"{query}" (drivers license OR driving record OR DMV OR DUI)',
+            'aviation': f'"{query}" (aircraft registration OR pilot license OR FAA)',
+            'social': f'"{query}" (Facebook OR Twitter OR Instagram OR LinkedIn OR social media)',
+            'online': f'"{query}" (username OR profile OR account OR online)',
+            'breaches': f'"{query}" (data breach OR password leak OR hack OR exposed)',
+            'websites': f'"{query}" (domain registration OR website owner OR WHOIS)',
+            'medical': f'"{query}" (medical license OR doctor OR physician OR MD)',
+            'sanctions': f'"{query}" (medical sanctions OR excluded provider OR Medicare fraud)',
+            'prescribers': f'"{query}" (DEA prescriber OR controlled substance OR prescription)',
+            'news_criminal': f'"{query}" (arrested OR charged OR convicted OR crime news)',
+            'news_business': f'"{query}" (CEO OR executive OR business news OR scandal)',
+            'investigations': f'"{query}" (investigation OR expose OR corruption OR fraud)',
+            'media': f'"{query}" (interview OR news OR media OR press OR appearance)',
+            'academic': f'"{query}" (research OR publication OR academic OR scholar)',
+            'research': f'"{query}" (research paper OR citation OR study OR journal)',
+            'grants': f'"{query}" (research grant OR funding OR NSF OR NIH)',
+            'university': f'"{query}" (university OR college OR alumni OR faculty)',
+            'military': f'"{query}" (military service OR veteran OR armed forces)',
+            'immigration': f'"{query}" (immigration OR visa OR naturalization OR USCIS)',
+            'political': f'"{query}" (political contribution OR campaign OR PAC OR lobbying)',
+            'nonprofit': f'"{query}" (nonprofit OR charity OR 501c3 OR foundation)',
+            'voter': f'"{query}" (voter registration OR voting record OR election)'
+        }
+        
+        if search_type in search_modifiers:
+            targeted_query = search_modifiers[search_type]
+        
+        # Add state parameter if provided (for location-specific searches)
+        if state:
+            # For US, Canada, Australia - add state/province to query for better location targeting
+            if country in ['us', 'ca', 'au']:
+                targeted_query = f"{targeted_query} {state}"
+        
+        # SERP API request with targeted query
         params = {
-            'q': query,
+            'q': targeted_query,
             'api_key': SERPAPI_KEY,
             'engine': 'google',
             'gl': country,
             'num': 10
         }
         
-        # Add state parameter if provided (for location-specific searches)
-        if state:
-            # For US, Canada, Australia - add state/province to query for better location targeting
-            if country in ['us', 'ca', 'au']:
-                params['q'] = f"{query} {state}"
+        print(f"DEBUG: Using targeted query: {targeted_query}")  # Temporary debug
         
         response = requests.get('https://serpapi.com/search', params=params, timeout=10)
         
@@ -362,9 +424,12 @@ def search():
                            len(results.get('scholarly_articles', [])) +
                            len(results.get('top_stories', [])))
             
-            # Log successful search (include state info in query if present)
-            logged_query = f"{query} [{state.upper()}]" if state else query
+            # Log successful search (include search type and state info)
+            logged_query = f"[{search_type.upper()}] {query}"
+            if state:
+                logged_query = f"{logged_query} [{state.upper()}]"
             log_search(client_ip, user_agent, logged_query, country, total_results, True, None)
+            print(f"DEBUG: Logged query: {logged_query}")  # Temporary debug
             
             return jsonify(results)
         elif response.status_code == 401:

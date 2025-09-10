@@ -134,6 +134,10 @@ def search():
         if country not in valid_countries:
             country = 'us'
         
+        # Extract and validate state (optional)
+        raw_state = data.get('state', '')
+        state = str(raw_state).lower().strip() if raw_state is not None else ''
+        
         if not query.strip():
             log_search(client_ip, user_agent, query, country, 0, False, 'Empty search query')
             return jsonify({'error': 'Search query is required'}), 400
@@ -146,6 +150,12 @@ def search():
             'gl': country,
             'num': 10
         }
+        
+        # Add state parameter if provided (for location-specific searches)
+        if state:
+            # For US, Canada, Australia - add state/province to query for better location targeting
+            if country in ['us', 'ca', 'au']:
+                params['q'] = f"{query} {state}"
         
         response = requests.get('https://serpapi.com/search', params=params, timeout=10)
         
@@ -352,8 +362,9 @@ def search():
                            len(results.get('scholarly_articles', [])) +
                            len(results.get('top_stories', [])))
             
-            # Log successful search
-            log_search(client_ip, user_agent, query, country, total_results, True, None)
+            # Log successful search (include state info in query if present)
+            logged_query = f"{query} [{state.upper()}]" if state else query
+            log_search(client_ip, user_agent, logged_query, country, total_results, True, None)
             
             return jsonify(results)
         elif response.status_code == 401:

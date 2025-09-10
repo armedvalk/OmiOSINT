@@ -215,7 +215,7 @@
                 
                 <div class="form-group" style="flex: 0 0 200px;">
                     <label for="country">Country</label>
-                    <select id="country" name="country">
+                    <select id="country" name="country" onchange="updateStateOptions()">
                         <option value="us">United States</option>
                         <option value="gb">United Kingdom</option>
                         <option value="ca">Canada</option>
@@ -231,6 +231,64 @@
                         <option value="it">Italy</option>
                         <option value="es">Spain</option>
                         <option value="nl">Netherlands</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="stateGroup" style="flex: 0 0 200px;">
+                    <label for="state">State/Province</label>
+                    <select id="state" name="state">
+                        <option value="">Any State</option>
+                        <option value="al">Alabama</option>
+                        <option value="ak">Alaska</option>
+                        <option value="az">Arizona</option>
+                        <option value="ar">Arkansas</option>
+                        <option value="ca">California</option>
+                        <option value="co">Colorado</option>
+                        <option value="ct">Connecticut</option>
+                        <option value="de">Delaware</option>
+                        <option value="fl">Florida</option>
+                        <option value="ga">Georgia</option>
+                        <option value="hi">Hawaii</option>
+                        <option value="id">Idaho</option>
+                        <option value="il">Illinois</option>
+                        <option value="in">Indiana</option>
+                        <option value="ia">Iowa</option>
+                        <option value="ks">Kansas</option>
+                        <option value="ky">Kentucky</option>
+                        <option value="la">Louisiana</option>
+                        <option value="me">Maine</option>
+                        <option value="md">Maryland</option>
+                        <option value="ma">Massachusetts</option>
+                        <option value="mi">Michigan</option>
+                        <option value="mn">Minnesota</option>
+                        <option value="ms">Mississippi</option>
+                        <option value="mo">Missouri</option>
+                        <option value="mt">Montana</option>
+                        <option value="ne">Nebraska</option>
+                        <option value="nv">Nevada</option>
+                        <option value="nh">New Hampshire</option>
+                        <option value="nj">New Jersey</option>
+                        <option value="nm">New Mexico</option>
+                        <option value="ny">New York</option>
+                        <option value="nc">North Carolina</option>
+                        <option value="nd">North Dakota</option>
+                        <option value="oh">Ohio</option>
+                        <option value="ok">Oklahoma</option>
+                        <option value="or">Oregon</option>
+                        <option value="pa">Pennsylvania</option>
+                        <option value="ri">Rhode Island</option>
+                        <option value="sc">South Carolina</option>
+                        <option value="sd">South Dakota</option>
+                        <option value="tn">Tennessee</option>
+                        <option value="tx">Texas</option>
+                        <option value="ut">Utah</option>
+                        <option value="vt">Vermont</option>
+                        <option value="va">Virginia</option>
+                        <option value="wa">Washington</option>
+                        <option value="wv">West Virginia</option>
+                        <option value="wi">Wisconsin</option>
+                        <option value="wy">Wyoming</option>
+                        <option value="dc">Washington D.C.</option>
                     </select>
                 </div>
                 
@@ -288,11 +346,88 @@
             }
         });
         
+        // Update state options based on selected country
+        function updateStateOptions() {
+            const country = document.getElementById('country').value;
+            const stateSelect = document.getElementById('state');
+            const stateGroup = document.getElementById('stateGroup');
+            
+            // Clear existing options
+            stateSelect.innerHTML = '<option value="">Any State/Province</option>';
+            
+            if (country === 'us') {
+                // US States
+                stateGroup.style.display = 'block';
+                const usStates = [
+                    {value: 'al', name: 'Alabama'}, {value: 'ak', name: 'Alaska'}, {value: 'az', name: 'Arizona'},
+                    {value: 'ar', name: 'Arkansas'}, {value: 'ca', name: 'California'}, {value: 'co', name: 'Colorado'},
+                    {value: 'ct', name: 'Connecticut'}, {value: 'de', name: 'Delaware'}, {value: 'fl', name: 'Florida'},
+                    {value: 'ga', name: 'Georgia'}, {value: 'hi', name: 'Hawaii'}, {value: 'id', name: 'Idaho'},
+                    {value: 'il', name: 'Illinois'}, {value: 'in', name: 'Indiana'}, {value: 'ia', name: 'Iowa'},
+                    {value: 'ks', name: 'Kansas'}, {value: 'ky', name: 'Kentucky'}, {value: 'la', name: 'Louisiana'},
+                    {value: 'me', name: 'Maine'}, {value: 'md', name: 'Maryland'}, {value: 'ma', name: 'Massachusetts'},
+                    {value: 'mi', name: 'Michigan'}, {value: 'mn', name: 'Minnesota'}, {value: 'ms', name: 'Mississippi'},
+                    {value: 'mo', name: 'Missouri'}, {value: 'mt', name: 'Montana'}, {value: 'ne', name: 'Nebraska'},
+                    {value: 'nv', name: 'Nevada'}, {value: 'nh', name: 'New Hampshire'}, {value: 'nj', name: 'New Jersey'},
+                    {value: 'nm', name: 'New Mexico'}, {value: 'ny', name: 'New York'}, {value: 'nc', name: 'North Carolina'},
+                    {value: 'nd', name: 'North Dakota'}, {value: 'oh', name: 'Ohio'}, {value: 'ok', name: 'Oklahoma'},
+                    {value: 'or', name: 'Oregon'}, {value: 'pa', name: 'Pennsylvania'}, {value: 'ri', name: 'Rhode Island'},
+                    {value: 'sc', name: 'South Carolina'}, {value: 'sd', name: 'South Dakota'}, {value: 'tn', name: 'Tennessee'},
+                    {value: 'tx', name: 'Texas'}, {value: 'ut', name: 'Utah'}, {value: 'vt', name: 'Vermont'},
+                    {value: 'va', name: 'Virginia'}, {value: 'wa', name: 'Washington'}, {value: 'wv', name: 'West Virginia'},
+                    {value: 'wi', name: 'Wisconsin'}, {value: 'wy', name: 'Wyoming'}, {value: 'dc', name: 'Washington D.C.'}
+                ];
+                usStates.forEach(state => {
+                    const option = document.createElement('option');
+                    option.value = state.value;
+                    option.textContent = state.name;
+                    stateSelect.appendChild(option);
+                });
+            } else if (country === 'ca') {
+                // Canadian Provinces
+                stateGroup.style.display = 'block';
+                const canadianProvinces = [
+                    {value: 'ab', name: 'Alberta'}, {value: 'bc', name: 'British Columbia'}, {value: 'mb', name: 'Manitoba'},
+                    {value: 'nb', name: 'New Brunswick'}, {value: 'nl', name: 'Newfoundland and Labrador'}, {value: 'ns', name: 'Nova Scotia'},
+                    {value: 'on', name: 'Ontario'}, {value: 'pe', name: 'Prince Edward Island'}, {value: 'qc', name: 'Quebec'},
+                    {value: 'sk', name: 'Saskatchewan'}, {value: 'nt', name: 'Northwest Territories'}, {value: 'nu', name: 'Nunavut'},
+                    {value: 'yt', name: 'Yukon'}
+                ];
+                canadianProvinces.forEach(province => {
+                    const option = document.createElement('option');
+                    option.value = province.value;
+                    option.textContent = province.name;
+                    stateSelect.appendChild(option);
+                });
+            } else if (country === 'au') {
+                // Australian States
+                stateGroup.style.display = 'block';
+                const australianStates = [
+                    {value: 'nsw', name: 'New South Wales'}, {value: 'vic', name: 'Victoria'}, {value: 'qld', name: 'Queensland'},
+                    {value: 'wa', name: 'Western Australia'}, {value: 'sa', name: 'South Australia'}, {value: 'tas', name: 'Tasmania'},
+                    {value: 'act', name: 'Australian Capital Territory'}, {value: 'nt', name: 'Northern Territory'}
+                ];
+                australianStates.forEach(state => {
+                    const option = document.createElement('option');
+                    option.value = state.value;
+                    option.textContent = state.name;
+                    stateSelect.appendChild(option);
+                });
+            } else {
+                // Hide state selector for other countries
+                stateGroup.style.display = 'none';
+            }
+        }
+        
+        // Initialize state options on page load
+        updateStateOptions();
+        
         document.getElementById('searchForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const query = document.getElementById('query').value.trim();
             const country = document.getElementById('country').value;
+            const state = document.getElementById('state').value;
             const searchBtn = document.getElementById('searchBtn');
             const loading = document.getElementById('loading');
             const errorContainer = document.getElementById('error-container');
@@ -320,7 +455,8 @@
                     },
                     body: JSON.stringify({
                         query: query,
-                        country: country
+                        country: country,
+                        state: state
                     })
                 });
                 

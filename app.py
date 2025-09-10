@@ -1,5 +1,8 @@
 import os
+import sqlite3
 import requests
+import datetime
+import json
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -12,18 +15,126 @@ CORS(app, origins=['http://localhost:5000', 'https://*.replit.app', 'https://*.r
 # Get SERP API key from environment
 SERPAPI_KEY = os.getenv('SERPAPI_API_KEY')
 
+# Initialize database
+def init_database():
+    conn = sqlite3.connect('osint_searches.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS search_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ip_address TEXT NOT NULL,
+            user_agent TEXT,
+            query TEXT NOT NULL,
+            country TEXT NOT NULL,
+            results_count INTEGER DEFAULT 0,
+            success BOOLEAN DEFAULT TRUE,
+            error_message TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Log search to database
+def log_search(ip_address, user_agent, query, country, results_count=0, success=True, error_message=None):
+    try:
+        conn = sqlite3.connect('osint_searches.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO search_logs (ip_address, user_agent, query, country, results_count, success, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (ip_address, user_agent, query, country, results_count, success, error_message))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error logging search: {e}")
+
+# Initialize database on startup
+init_database()
+
 @app.route('/')
 def index():
     return render_template_string(open('main.html').read())
 
 @app.route('/search', methods=['POST'])
 def search():
+    # Get client IP and user agent for logging
+    # Extract the first IP from X-Forwarded-For header (client IP)
+    forwarded_for = request.environ.get('HTTP_X_FORWARDED_FOR', '')
+    if forwarded_for:
+        client_ip = forwarded_for.split(',')[0].strip()
+    else:
+        client_ip = request.environ.get('REMOTE_ADDR', 'unknown')
+    
+    user_agent = request.environ.get('HTTP_USER_AGENT', 'unknown')[:500]  # Limit length
+    
+    # Initialize variables for logging
+    query = ''
+    country = 'us'
+    
     try:
-        data = request.get_json()
-        query = data.get('query', '')
-        country = data.get('country', 'us')
+        # Robust JSON parsing with comprehensive validation
+        data = None
+        
+        # Handle different content types and payload formats
+        if request.content_type and 'application/json' in request.content_type:
+            try:
+                raw_data = request.get_json(silent=True, force=True)
+                # Handle various JSON payload types
+                if raw_data is None:
+                    log_search(client_ip, user_agent, query, country, 0, False, 'Empty JSON payload')
+                    return jsonify({'error': 'Empty or malformed JSON payload'}), 400
+                elif isinstance(raw_data, str):
+                    # JSON string - try to parse it
+                    try:
+                        data = json.loads(raw_data)
+                        if not isinstance(data, dict):
+                            raise ValueError("JSON must be an object")
+                    except (json.JSONDecodeError, ValueError):
+                        log_search(client_ip, user_agent, query, country, 0, False, 'Invalid JSON string format')
+                        return jsonify({'error': 'JSON payload must be a valid object'}), 400
+                elif isinstance(raw_data, dict):
+                    data = raw_data
+                elif isinstance(raw_data, list):
+                    log_search(client_ip, user_agent, query, country, 0, False, 'JSON array not supported')
+                    return jsonify({'error': 'JSON payload must be an object, not an array'}), 400
+                else:
+                    log_search(client_ip, user_agent, query, country, 0, False, f'Unsupported JSON type: {type(raw_data).__name__}')
+                    return jsonify({'error': f'Unsupported JSON payload type: {type(raw_data).__name__}'}), 400
+            except Exception as e:
+                log_search(client_ip, user_agent, query, country, 0, False, f'JSON parsing error: {str(e)}')
+                return jsonify({'error': 'Failed to parse JSON payload'}), 400
+        else:
+            # Try form data as fallback
+            data = request.form.to_dict()
+            if not data:
+                log_search(client_ip, user_agent, query, country, 0, False, 'No data provided')
+                return jsonify({'error': 'No search data provided'}), 400
+        
+        # Validate and extract parameters
+        if not isinstance(data, dict):
+            log_search(client_ip, user_agent, query, country, 0, False, 'Data is not a dictionary')
+            return jsonify({'error': 'Invalid request format'}), 400
+        
+        # Extract and validate query
+        raw_query = data.get('query', '')
+        query = str(raw_query).strip() if raw_query is not None else ''
+        
+        # Extract and validate country
+        raw_country = data.get('country', 'us')
+        country = str(raw_country).lower() if raw_country is not None else 'us'
+        
+        # Validate country code
+        valid_countries = ['us', 'gb', 'ca', 'au', 'de', 'fr', 'jp', 'cn', 'in', 'br', 'mx', 'ru', 'it', 'es', 'nl']
+        if country not in valid_countries:
+            country = 'us'
         
         if not query.strip():
+            log_search(client_ip, user_agent, query, country, 0, False, 'Empty search query')
             return jsonify({'error': 'Search query is required'}), 400
         
         # SERP API request
@@ -230,26 +341,178 @@ def search():
                     }
                     results['top_stories'].append(story_item)
             
+            # Count total results
+            total_results = (len(results.get('organic_results', [])) + 
+                           len(results.get('news_results', [])) +
+                           len(results.get('image_results', [])) +
+                           len(results.get('video_results', [])) +
+                           len(results.get('local_results', [])) +
+                           len(results.get('shopping_results', [])) +
+                           len(results.get('scholarly_articles', [])) +
+                           len(results.get('top_stories', [])))
+            
+            # Log successful search
+            log_search(client_ip, user_agent, query, country, total_results, True, None)
+            
             return jsonify(results)
         elif response.status_code == 401:
+            log_search(client_ip, user_agent, query, country, 0, False, 'Invalid SERP API key')
             return jsonify({'error': 'Invalid SERP API key. Please check your API credentials.'}), 401
         elif response.status_code == 403:
+            log_search(client_ip, user_agent, query, country, 0, False, 'Access denied - insufficient permissions')
             return jsonify({'error': 'Access denied. Your SERP API key may have insufficient permissions.'}), 403
         elif response.status_code == 429:
+            log_search(client_ip, user_agent, query, country, 0, False, 'Rate limit exceeded')
             return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
         else:
-            return jsonify({'error': f'SERP API error: {response.status_code}'}), 500
+            error_msg = f'SERP API error: {response.status_code}'
+            log_search(client_ip, user_agent, query, country, 0, False, error_msg)
+            return jsonify({'error': error_msg}), 500
             
     except requests.exceptions.Timeout:
+        log_search(client_ip, user_agent, query, country, 0, False, 'Request timeout')
         return jsonify({'error': 'Request timeout. The search service is taking too long to respond.'}), 504
     except requests.exceptions.RequestException as e:
-        return jsonify({'error': f'Network error: {str(e)}'}), 500
+        error_msg = f'Network error: {str(e)}'
+        log_search(client_ip, user_agent, query, country, 0, False, error_msg)
+        return jsonify({'error': error_msg}), 500
+    except Exception as e:
+        error_msg = str(e)
+        log_search(client_ip, user_agent, query, country, 0, False, error_msg)
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/search-history')
+def search_history():
+    try:
+        conn = sqlite3.connect('osint_searches.db')
+        cursor = conn.cursor()
+        
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)  # Limit max per page
+        offset = (page - 1) * per_page
+        
+        # Get total count
+        cursor.execute('SELECT COUNT(*) FROM search_logs')
+        total_count = cursor.fetchone()[0]
+        
+        # Get search logs with pagination
+        cursor.execute('''
+            SELECT id, timestamp, ip_address, user_agent, query, country, 
+                   results_count, success, error_message
+            FROM search_logs 
+            ORDER BY timestamp DESC 
+            LIMIT ? OFFSET ?
+        ''', (per_page, offset))
+        
+        logs = []
+        for row in cursor.fetchall():
+            logs.append({
+                'id': row[0],
+                'timestamp': row[1],
+                'ip_address': row[2],
+                'user_agent': row[3],
+                'query': row[4],
+                'country': row[5],
+                'results_count': row[6],
+                'success': bool(row[7]),
+                'error_message': row[8]
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            'logs': logs,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_count + per_page - 1) // per_page
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/search-stats')
+def search_stats():
+    try:
+        conn = sqlite3.connect('osint_searches.db')
+        cursor = conn.cursor()
+        
+        # Get basic statistics
+        cursor.execute('SELECT COUNT(*) FROM search_logs')
+        total_searches = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM search_logs WHERE success = 1')
+        successful_searches = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(DISTINCT ip_address) FROM search_logs')
+        unique_ips = cursor.fetchone()[0]
+        
+        # Get top queries
+        cursor.execute('''
+            SELECT query, COUNT(*) as count 
+            FROM search_logs 
+            WHERE success = 1
+            GROUP BY query 
+            ORDER BY count DESC 
+            LIMIT 10
+        ''')
+        top_queries = [{'query': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        # Get top countries
+        cursor.execute('''
+            SELECT country, COUNT(*) as count 
+            FROM search_logs 
+            WHERE success = 1
+            GROUP BY country 
+            ORDER BY count DESC 
+            LIMIT 10
+        ''')
+        top_countries = [{'country': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        # Get searches by day (last 7 days)
+        cursor.execute('''
+            SELECT DATE(timestamp) as date, COUNT(*) as count 
+            FROM search_logs 
+            WHERE timestamp >= datetime('now', '-7 days')
+            GROUP BY DATE(timestamp)
+            ORDER BY date DESC
+        ''')
+        daily_searches = [{'date': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'total_searches': total_searches,
+            'successful_searches': successful_searches,
+            'unique_ips': unique_ips,
+            'success_rate': round((successful_searches / total_searches * 100), 2) if total_searches > 0 else 0,
+            'top_queries': top_queries,
+            'top_countries': top_countries,
+            'daily_searches': daily_searches
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'healthy', 'serpapi_configured': bool(SERPAPI_KEY)})
+    # Also check database health
+    db_healthy = False
+    try:
+        conn = sqlite3.connect('osint_searches.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM search_logs')
+        conn.close()
+        db_healthy = True
+    except Exception:
+        pass
+    
+    return jsonify({
+        'status': 'healthy', 
+        'serpapi_configured': bool(SERPAPI_KEY),
+        'database_healthy': db_healthy
+    })
 
 if __name__ == '__main__':
     if not SERPAPI_KEY:

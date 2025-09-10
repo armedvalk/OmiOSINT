@@ -237,6 +237,10 @@
                 <button type="submit" class="search-btn" id="searchBtn">
                     🔍 Search
                 </button>
+                
+                <button type="button" class="search-btn" id="historyBtn" style="margin-left: 10px; background: linear-gradient(135deg, #28a745, #20c997);">
+                    📊 Search History
+                </button>
             </form>
             
             <div class="loading" id="loading">
@@ -245,10 +249,45 @@
             
             <div id="error-container"></div>
             <div id="results-container"></div>
+            
+            <!-- Search History Modal -->
+            <div id="historyModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+                <div style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: none; border-radius: 15px; width: 90%; max-width: 1200px; max-height: 80vh; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0; color: #2c3e50;">📊 OSINT Search History & Analytics</h2>
+                        <span id="closeModal" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+                    </div>
+                    
+                    <div id="historyContent">
+                        <div style="text-align: center; margin: 40px 0;">
+                            <p>🔄 Loading search history...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
+        // History button event listener
+        document.getElementById('historyBtn').addEventListener('click', function() {
+            document.getElementById('historyModal').style.display = 'block';
+            loadSearchHistory();
+        });
+        
+        // Close modal event listener
+        document.getElementById('closeModal').addEventListener('click', function() {
+            document.getElementById('historyModal').style.display = 'none';
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('historyModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
         document.getElementById('searchForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -729,6 +768,226 @@
             errorDiv.textContent = message;
             errorContainer.innerHTML = '';
             errorContainer.appendChild(errorDiv);
+        }
+        
+        async function loadSearchHistory() {
+            const historyContent = document.getElementById('historyContent');
+            
+            try {
+                // Load statistics first
+                const statsResponse = await fetch('/search-stats');
+                const stats = await statsResponse.json();
+                
+                // Load search history
+                const historyResponse = await fetch('/search-history?page=1&per_page=50');
+                const history = await historyResponse.json();
+                
+                // Clear the container
+                historyContent.innerHTML = '';
+                
+                // Statistics section
+                const statsSection = createElement('div', 'results');
+                const statsTitle = createElement('h3', 'section-title', '📈 Search Statistics');
+                statsSection.appendChild(statsTitle);
+                
+                const statsGrid = document.createElement('div');
+                statsGrid.style.display = 'grid';
+                statsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+                statsGrid.style.gap = '15px';
+                statsGrid.style.marginBottom = '20px';
+                
+                // Total searches card
+                const totalCard = createElement('div', 'result-card');
+                totalCard.style.textAlign = 'center';
+                totalCard.style.padding = '15px';
+                const totalValue = createElement('div', '', stats.total_searches.toString());
+                totalValue.style.fontSize = '24px';
+                totalValue.style.fontWeight = 'bold';
+                totalValue.style.color = '#667eea';
+                const totalLabel = createElement('div', '', 'Total Searches');
+                totalCard.appendChild(totalValue);
+                totalCard.appendChild(totalLabel);
+                statsGrid.appendChild(totalCard);
+                
+                // Success rate card
+                const successCard = createElement('div', 'result-card');
+                successCard.style.textAlign = 'center';
+                successCard.style.padding = '15px';
+                const successValue = createElement('div', '', stats.success_rate + '%');
+                successValue.style.fontSize = '24px';
+                successValue.style.fontWeight = 'bold';
+                successValue.style.color = '#28a745';
+                const successLabel = createElement('div', '', 'Success Rate');
+                successCard.appendChild(successValue);
+                successCard.appendChild(successLabel);
+                statsGrid.appendChild(successCard);
+                
+                // Unique IPs card
+                const ipCard = createElement('div', 'result-card');
+                ipCard.style.textAlign = 'center';
+                ipCard.style.padding = '15px';
+                const ipValue = createElement('div', '', stats.unique_ips.toString());
+                ipValue.style.fontSize = '24px';
+                ipValue.style.fontWeight = 'bold';
+                ipValue.style.color = '#dc3545';
+                const ipLabel = createElement('div', '', 'Unique IP Addresses');
+                ipCard.appendChild(ipValue);
+                ipCard.appendChild(ipLabel);
+                statsGrid.appendChild(ipCard);
+                
+                statsSection.appendChild(statsGrid);
+                historyContent.appendChild(statsSection);
+                
+                // Top queries section
+                if (stats.top_queries && stats.top_queries.length > 0) {
+                    const queriesSection = createElement('div', 'results');
+                    const queriesTitle = createElement('h3', 'section-title', '🔍 Top Search Queries');
+                    queriesSection.appendChild(queriesTitle);
+                    
+                    const queriesGrid = document.createElement('div');
+                    queriesGrid.style.display = 'flex';
+                    queriesGrid.style.flexWrap = 'wrap';
+                    queriesGrid.style.gap = '10px';
+                    queriesGrid.style.marginBottom = '20px';
+                    
+                    stats.top_queries.forEach(item => {
+                        const queryCard = createElement('div', 'result-card');
+                        queryCard.style.padding = '10px';
+                        queryCard.style.margin = '0';
+                        queryCard.style.minWidth = '200px';
+                        
+                        const queryText = document.createElement('strong');
+                        queryText.textContent = item.query;
+                        const countText = createElement('span', '', ` (${item.count} searches)`);
+                        countText.style.color = '#667eea';
+                        
+                        queryCard.appendChild(queryText);
+                        queryCard.appendChild(countText);
+                        queriesGrid.appendChild(queryCard);
+                    });
+                    
+                    queriesSection.appendChild(queriesGrid);
+                    historyContent.appendChild(queriesSection);
+                }
+                
+                // Recent searches table
+                const tableSection = createElement('div', 'results');
+                const tableTitle = createElement('h3', 'section-title', '📜 Recent Searches');
+                tableSection.appendChild(tableTitle);
+                
+                const tableWrapper = document.createElement('div');
+                tableWrapper.style.overflowX = 'auto';
+                
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.style.borderCollapse = 'collapse';
+                table.style.background = 'white';
+                table.style.borderRadius = '10px';
+                table.style.overflow = 'hidden';
+                table.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+                
+                // Table header
+                const thead = document.createElement('thead');
+                thead.style.background = '#f8f9fa';
+                const headerRow = document.createElement('tr');
+                
+                const headers = ['Timestamp', 'IP Address', 'Query', 'Country', 'Results', 'Status'];
+                headers.forEach(headerText => {
+                    const th = document.createElement('th');
+                    th.style.padding = '12px';
+                    th.style.textAlign = 'left';
+                    th.style.borderBottom = '1px solid #dee2e6';
+                    th.textContent = headerText;
+                    headerRow.appendChild(th);
+                });
+                
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+                
+                // Table body
+                const tbody = document.createElement('tbody');
+                
+                if (history.logs && history.logs.length > 0) {
+                    history.logs.forEach(log => {
+                        const row = document.createElement('tr');
+                        row.style.borderBottom = '1px solid #dee2e6';
+                        
+                        // Timestamp
+                        const timestampCell = document.createElement('td');
+                        timestampCell.style.padding = '12px';
+                        timestampCell.style.fontSize = '12px';
+                        timestampCell.textContent = new Date(log.timestamp).toLocaleString();
+                        row.appendChild(timestampCell);
+                        
+                        // IP Address
+                        const ipCell = document.createElement('td');
+                        ipCell.style.padding = '12px';
+                        ipCell.style.fontFamily = 'monospace';
+                        ipCell.style.fontSize = '12px';
+                        ipCell.textContent = log.ip_address || 'unknown';
+                        row.appendChild(ipCell);
+                        
+                        // Query
+                        const queryCell = document.createElement('td');
+                        queryCell.style.padding = '12px';
+                        queryCell.style.maxWidth = '200px';
+                        queryCell.style.overflow = 'hidden';
+                        queryCell.style.textOverflow = 'ellipsis';
+                        queryCell.style.whiteSpace = 'nowrap';
+                        queryCell.title = log.query || '';
+                        queryCell.textContent = log.query || '';
+                        row.appendChild(queryCell);
+                        
+                        // Country
+                        const countryCell = document.createElement('td');
+                        countryCell.style.padding = '12px';
+                        countryCell.style.textAlign = 'center';
+                        countryCell.textContent = (log.country || '').toUpperCase();
+                        row.appendChild(countryCell);
+                        
+                        // Results
+                        const resultsCell = document.createElement('td');
+                        resultsCell.style.padding = '12px';
+                        resultsCell.style.textAlign = 'center';
+                        resultsCell.textContent = log.results_count.toString();
+                        row.appendChild(resultsCell);
+                        
+                        // Status
+                        const statusCell = document.createElement('td');
+                        statusCell.style.padding = '12px';
+                        statusCell.style.textAlign = 'center';
+                        const statusIcon = log.success ? '✅' : '❌';
+                        const statusColor = log.success ? '#28a745' : '#dc3545';
+                        statusCell.style.color = statusColor;
+                        statusCell.textContent = statusIcon;
+                        row.appendChild(statusCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    const emptyRow = document.createElement('tr');
+                    const emptyCell = document.createElement('td');
+                    emptyCell.setAttribute('colspan', '6');
+                    emptyCell.style.padding = '20px';
+                    emptyCell.style.textAlign = 'center';
+                    emptyCell.style.color = '#6c757d';
+                    emptyCell.textContent = 'No search history found';
+                    emptyRow.appendChild(emptyCell);
+                    tbody.appendChild(emptyRow);
+                }
+                
+                table.appendChild(tbody);
+                tableWrapper.appendChild(table);
+                tableSection.appendChild(tableWrapper);
+                historyContent.appendChild(tableSection);
+                
+            } catch (error) {
+                historyContent.innerHTML = `
+                    <div class="error">
+                        Failed to load search history: ${error.message}
+                    </div>
+                `;
+            }
         }
     </script>
 </body>

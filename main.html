@@ -1,4 +1,735 @@
-<!DOCTYPE>
-<div style="width: 100%; height: 100%;align: center;>
-    
-</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmiOSINT - OSINT Search Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .search-section {
+            padding: 40px;
+            background: white;
+        }
+        
+        .search-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 30px;
+            align-items: end;
+        }
+        
+        .form-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .search-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+        }
+        
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 30px 0;
+            color: #667eea;
+        }
+        
+        .results {
+            margin-top: 30px;
+        }
+        
+        .result-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .result-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .result-title {
+            color: #1a73e8;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            text-decoration: none;
+        }
+        
+        .result-title:hover {
+            text-decoration: underline;
+        }
+        
+        .result-url {
+            color: #006621;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .result-snippet {
+            color: #4f4f4f;
+            line-height: 1.5;
+        }
+        
+        .news-section,
+        .knowledge-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .section-title {
+            color: #2c3e50;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .error {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .search-form {
+                flex-direction: column;
+            }
+            
+            .form-group {
+                min-width: 100%;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 OmiOSINT</h1>
+            <p>Open Source Intelligence Gathering Tool</p>
+        </div>
+        
+        <div class="search-section">
+            <form class="search-form" id="searchForm">
+                <div class="form-group">
+                    <label for="query">Search Query</label>
+                    <input type="text" id="query" name="query" placeholder="Enter search terms for OSINT investigation..." required>
+                </div>
+                
+                <div class="form-group" style="flex: 0 0 200px;">
+                    <label for="country">Country</label>
+                    <select id="country" name="country">
+                        <option value="us">United States</option>
+                        <option value="gb">United Kingdom</option>
+                        <option value="ca">Canada</option>
+                        <option value="au">Australia</option>
+                        <option value="de">Germany</option>
+                        <option value="fr">France</option>
+                        <option value="jp">Japan</option>
+                        <option value="cn">China</option>
+                        <option value="in">India</option>
+                        <option value="br">Brazil</option>
+                        <option value="mx">Mexico</option>
+                        <option value="ru">Russia</option>
+                        <option value="it">Italy</option>
+                        <option value="es">Spain</option>
+                        <option value="nl">Netherlands</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="search-btn" id="searchBtn">
+                    🔍 Search
+                </button>
+            </form>
+            
+            <div class="loading" id="loading">
+                <p>🔄 Searching... Please wait</p>
+            </div>
+            
+            <div id="error-container"></div>
+            <div id="results-container"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('searchForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const query = document.getElementById('query').value.trim();
+            const country = document.getElementById('country').value;
+            const searchBtn = document.getElementById('searchBtn');
+            const loading = document.getElementById('loading');
+            const errorContainer = document.getElementById('error-container');
+            const resultsContainer = document.getElementById('results-container');
+            
+            if (!query) {
+                showError('Please enter a search query');
+                return;
+            }
+            
+            // Clear previous results and errors
+            errorContainer.innerHTML = '';
+            resultsContainer.innerHTML = '';
+            
+            // Show loading state
+            searchBtn.disabled = true;
+            searchBtn.textContent = '⏳ Searching...';
+            loading.style.display = 'block';
+            
+            try {
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        country: country
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Search failed');
+                }
+                
+                displayResults(data);
+                
+            } catch (error) {
+                showError('Search failed: ' + error.message);
+            } finally {
+                // Reset button state
+                searchBtn.disabled = false;
+                searchBtn.textContent = '🔍 Search';
+                loading.style.display = 'none';
+            }
+        });
+        
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `<div class="error">${message}</div>`;
+        }
+        
+        function displayResults(data) {
+            const resultsContainer = document.getElementById('results-container');
+            resultsContainer.innerHTML = '';
+            
+            // Helper function to safely create text nodes
+            function safeText(text) {
+                return document.createTextNode(text || '');
+            }
+            
+            // Helper function to create safe elements
+            function createElement(tag, className = '', content = '') {
+                const element = document.createElement(tag);
+                if (className) element.className = className;
+                if (content) element.appendChild(safeText(content));
+                return element;
+            }
+            
+            if (data.organic_results && data.organic_results.length > 0) {
+                const resultsDiv = createElement('div', 'results');
+                const title = createElement('h2', 'section-title', '🌐 Search Results');
+                resultsDiv.appendChild(title);
+                
+                data.organic_results.forEach(result => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = result.link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(result.title));
+                    card.appendChild(link);
+                    
+                    const url = createElement('div', 'result-url', result.displayed_link || result.link);
+                    card.appendChild(url);
+                    
+                    const snippet = createElement('div', 'result-snippet', result.snippet);
+                    card.appendChild(snippet);
+                    
+                    resultsDiv.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(resultsDiv);
+            }
+            
+            if (data.news_results && data.news_results.length > 0) {
+                const newsSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '📰 News Results');
+                newsSection.appendChild(title);
+                
+                data.news_results.forEach(result => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = result.link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(result.title));
+                    card.appendChild(link);
+                    
+                    const sourceText = result.source + (result.date ? ' - ' + result.date : '');
+                    const url = createElement('div', 'result-url', sourceText);
+                    card.appendChild(url);
+                    
+                    const snippet = createElement('div', 'result-snippet', result.snippet);
+                    card.appendChild(snippet);
+                    
+                    newsSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(newsSection);
+            }
+            
+            // Display Answer Box
+            if (data.answer_box) {
+                const answerSection = createElement('div', 'knowledge-section');
+                const title = createElement('h2', 'section-title', '💡 Answer Box');
+                answerSection.appendChild(title);
+                
+                const card = createElement('div', 'result-card');
+                
+                if (data.answer_box.answer) {
+                    const answer = createElement('div', '', data.answer_box.answer);
+                    answer.style.fontWeight = 'bold';
+                    answer.style.marginBottom = '10px';
+                    card.appendChild(answer);
+                }
+                
+                if (data.answer_box.snippet) {
+                    const snippet = createElement('div', 'result-snippet', data.answer_box.snippet);
+                    card.appendChild(snippet);
+                }
+                
+                answerSection.appendChild(card);
+                resultsContainer.appendChild(answerSection);
+            }
+            
+            // Display Knowledge Graph
+            if (data.knowledge_graph) {
+                const knowledgeSection = createElement('div', 'knowledge-section');
+                const title = createElement('h2', 'section-title', '📊 Knowledge Graph');
+                knowledgeSection.appendChild(title);
+                
+                const card = createElement('div', 'result-card');
+                
+                if (data.knowledge_graph.title) {
+                    const h3 = createElement('h3', '', data.knowledge_graph.title);
+                    card.appendChild(h3);
+                }
+                
+                if (data.knowledge_graph.description) {
+                    const p = createElement('p', '', data.knowledge_graph.description);
+                    card.appendChild(p);
+                }
+                
+                knowledgeSection.appendChild(card);
+                resultsContainer.appendChild(knowledgeSection);
+            }
+            
+            // Display Top Stories
+            if (data.top_stories && data.top_stories.length > 0) {
+                const storiesSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🔥 Top Stories');
+                storiesSection.appendChild(title);
+                
+                data.top_stories.forEach(story => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = story.link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(story.title));
+                    card.appendChild(link);
+                    
+                    const sourceText = story.source + (story.date ? ' - ' + story.date : '');
+                    const url = createElement('div', 'result-url', sourceText);
+                    card.appendChild(url);
+                    
+                    if (story.snippet) {
+                        const snippet = createElement('div', 'result-snippet', story.snippet);
+                        card.appendChild(snippet);
+                    }
+                    
+                    storiesSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(storiesSection);
+            }
+            
+            // Display Local Results
+            if (data.local_results && data.local_results.length > 0) {
+                const localSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '📍 Local Results');
+                localSection.appendChild(title);
+                
+                data.local_results.forEach(result => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const businessTitle = createElement('h3', '', result.title);
+                    card.appendChild(businessTitle);
+                    
+                    if (result.address) {
+                        const address = createElement('div', '', '📍 ' + result.address);
+                        card.appendChild(address);
+                    }
+                    
+                    if (result.rating && result.reviews) {
+                        const rating = createElement('div', '', `⭐ ${result.rating} (${result.reviews} reviews)`);
+                        card.appendChild(rating);
+                    }
+                    
+                    if (result.phone) {
+                        const phone = createElement('div', '', '📞 ' + result.phone);
+                        card.appendChild(phone);
+                    }
+                    
+                    if (result.website) {
+                        const website = document.createElement('a');
+                        website.href = result.website;
+                        website.target = '_blank';
+                        website.appendChild(safeText('🌐 Visit Website'));
+                        card.appendChild(website);
+                    }
+                    
+                    localSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(localSection);
+            }
+            
+            // Display Image Results
+            if (data.image_results && data.image_results.length > 0) {
+                const imageSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🖼️ Image Results');
+                imageSection.appendChild(title);
+                
+                const imageGrid = document.createElement('div');
+                imageGrid.style.display = 'grid';
+                imageGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+                imageGrid.style.gap = '15px';
+                
+                data.image_results.slice(0, 8).forEach(result => {
+                    const imageCard = createElement('div', 'result-card');
+                    imageCard.style.padding = '10px';
+                    
+                    const img = document.createElement('img');
+                    img.src = result.thumbnail || result.original;
+                    img.alt = result.title || 'OSINT Image';
+                    img.style.width = '100%';
+                    img.style.height = 'auto';
+                    img.style.borderRadius = '5px';
+                    img.style.maxHeight = '150px';
+                    img.style.objectFit = 'cover';
+                    imageCard.appendChild(img);
+                    
+                    if (result.title) {
+                        const caption = createElement('div', '', result.title);
+                        caption.style.fontSize = '12px';
+                        caption.style.marginTop = '5px';
+                        imageCard.appendChild(caption);
+                    }
+                    
+                    imageGrid.appendChild(imageCard);
+                });
+                
+                imageSection.appendChild(imageGrid);
+                resultsContainer.appendChild(imageSection);
+            }
+            
+            // Display Video Results
+            if (data.video_results && data.video_results.length > 0) {
+                const videoSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🎥 Video Results');
+                videoSection.appendChild(title);
+                
+                data.video_results.forEach(result => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = result.link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(result.title));
+                    card.appendChild(link);
+                    
+                    const platform = result.platform || result.displayed_link || '';
+                    const duration = result.duration ? ' - ' + result.duration : '';
+                    const date = result.date ? ' - ' + result.date : '';
+                    const meta = createElement('div', 'result-url', platform + duration + date);
+                    card.appendChild(meta);
+                    
+                    videoSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(videoSection);
+            }
+            
+            // Display People Also Ask
+            if (data.people_also_ask && data.people_also_ask.length > 0) {
+                const paaSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '❓ People Also Ask');
+                paaSection.appendChild(title);
+                
+                data.people_also_ask.forEach(q => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const question = createElement('div', '', q.question);
+                    question.style.fontWeight = 'bold';
+                    question.style.marginBottom = '8px';
+                    card.appendChild(question);
+                    
+                    if (q.snippet) {
+                        const answer = createElement('div', 'result-snippet', q.snippet);
+                        card.appendChild(answer);
+                    }
+                    
+                    if (q.link) {
+                        const source = document.createElement('a');
+                        source.href = q.link;
+                        source.target = '_blank';
+                        source.className = 'result-url';
+                        source.appendChild(safeText(q.displayed_link || q.link));
+                        card.appendChild(source);
+                    }
+                    
+                    paaSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(paaSection);
+            }
+            
+            // Display Shopping Results
+            if (data.shopping_results && data.shopping_results.length > 0) {
+                const shoppingSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🛒 Shopping Results');
+                shoppingSection.appendChild(title);
+                
+                data.shopping_results.forEach(result => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = result.link || result.product_link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(result.title));
+                    card.appendChild(link);
+                    
+                    let metaText = result.source || '';
+                    if (result.price) metaText += ' - ' + result.price;
+                    if (result.rating) metaText += ' - ⭐ ' + result.rating;
+                    
+                    const meta = createElement('div', 'result-url', metaText);
+                    card.appendChild(meta);
+                    
+                    shoppingSection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(shoppingSection);
+            }
+            
+            // Display Scholarly Articles
+            if (data.scholarly_articles && data.scholarly_articles.length > 0) {
+                const scholarlySection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '📚 Scholarly Articles');
+                scholarlySection.appendChild(title);
+                
+                data.scholarly_articles.forEach(article => {
+                    const card = createElement('div', 'result-card');
+                    
+                    const link = document.createElement('a');
+                    link.href = article.link || '#';
+                    link.target = '_blank';
+                    link.className = 'result-title';
+                    link.appendChild(safeText(article.title));
+                    card.appendChild(link);
+                    
+                    if (article.snippet) {
+                        const snippet = createElement('div', 'result-snippet', article.snippet);
+                        card.appendChild(snippet);
+                    }
+                    
+                    scholarlySection.appendChild(card);
+                });
+                
+                resultsContainer.appendChild(scholarlySection);
+            }
+            
+            // Display Related Searches
+            if (data.related_searches && data.related_searches.length > 0) {
+                const relatedSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🔗 Related Searches');
+                relatedSection.appendChild(title);
+                
+                const searchGrid = document.createElement('div');
+                searchGrid.style.display = 'flex';
+                searchGrid.style.flexWrap = 'wrap';
+                searchGrid.style.gap = '10px';
+                searchGrid.style.padding = '20px';
+                
+                data.related_searches.forEach(search => {
+                    const searchButton = document.createElement('button');
+                    searchButton.style.padding = '8px 15px';
+                    searchButton.style.background = '#f0f0f0';
+                    searchButton.style.border = '1px solid #ddd';
+                    searchButton.style.borderRadius = '20px';
+                    searchButton.style.cursor = 'pointer';
+                    searchButton.style.fontSize = '14px';
+                    searchButton.appendChild(safeText(search.query));
+                    
+                    searchButton.onclick = () => {
+                        document.getElementById('query').value = search.query;
+                        document.getElementById('searchForm').dispatchEvent(new Event('submit'));
+                    };
+                    
+                    searchGrid.appendChild(searchButton);
+                });
+                
+                relatedSection.appendChild(searchGrid);
+                resultsContainer.appendChild(relatedSection);
+            }
+            
+            // Display Raw JSON Data for advanced users
+            if (data.raw_data) {
+                const rawSection = createElement('div', 'news-section');
+                const title = createElement('h2', 'section-title', '🔍 Raw JSON Data (Advanced)');
+                rawSection.appendChild(title);
+                
+                const details = document.createElement('details');
+                const summary = document.createElement('summary');
+                summary.appendChild(safeText('Click to view complete SERP API response'));
+                summary.style.cursor = 'pointer';
+                summary.style.fontWeight = 'bold';
+                
+                const pre = document.createElement('pre');
+                pre.style.background = '#f5f5f5';
+                pre.style.padding = '15px';
+                pre.style.borderRadius = '5px';
+                pre.style.overflow = 'auto';
+                pre.style.maxHeight = '400px';
+                pre.appendChild(safeText(JSON.stringify(data.raw_data, null, 2)));
+                
+                details.appendChild(summary);
+                details.appendChild(pre);
+                rawSection.appendChild(details);
+                resultsContainer.appendChild(rawSection);
+            }
+            
+            // Show message if no results
+            if (resultsContainer.children.length === 0) {
+                const noResults = createElement('div', 'result-card', 'No results found for your search query.');
+                resultsContainer.appendChild(noResults);
+            }
+        }
+        
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            errorContainer.innerHTML = '';
+            errorContainer.appendChild(errorDiv);
+        }
+    </script>
+</body>
+</html>
